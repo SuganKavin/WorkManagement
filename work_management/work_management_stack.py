@@ -1,5 +1,5 @@
 from aws_cdk import core
-
+from . import work_management_service
 
 class WorkManagementStack(core.Stack):
 
@@ -7,3 +7,4 @@ class WorkManagementStack(core.Stack):
         super().__init__(scope, id, **kwargs)
 
         # The code that defines your stack goes here
+        work_management_service.WorkMgntService(self, "WorkMgnt")
