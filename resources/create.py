@@ -11,44 +11,34 @@ dynamodb = boto3.resource('dynamodb')
 
 def handler(event, context):
     data = json.loads(event['body'])
-    '''if 'profileId' not in data:
-        logging.error("Validation Failed")
-        raise Exception("Couldn't create the account.")'''
-
 
     workmgnt_table = dynamodb.Table(os.environ['WORKMGNT_TABLE'])
+    workstatus_table = dynamodb.Table(os.environ['WORKMGNTSTATUS_TABLE'])
 
-    item = {
-        'id': str(uuid.uuid1()),
-        'accountId': data['accountId'],
-        'orgId': data['orgId'],
-        'type': data['type'],
-        'deliveryType':data['deliveryType'],
-        'category': data['category'],
-        'industry': data['industry'],
-        'selectionModel': data['selectionModel'],
-        'startDate': data['startDate'],
-        'endDate': data['endDate'],
-        'estimatedEffort':data['estimatedEffort'],
-        'description':data['description'],
-        'outcome':data['outcome'],
-        'rewardType':data['rewardType'],
-        'rewardUnits':data['rewardUnits'],
-        'rewardModel':data['rewardModel'],
-        'criticalIndicator':data['criticalIndicator'],
-        'internAllowedIndicator':data['internAllowedIndicator'],
-        'travelIndicator':data['travelIndicator'],
-        'skill': data['skill'],
-        'attachments':data['attachments'],
-    }
+    work_detail = {}
+    workid =str(uuid.uuid1())
+
+    for k, v in data.items():
+        work_detail[k] = v
+
+
+    work_detail['id'] =workid
 
     # write the account to the database
-    workmgnt_table.put_item(Item=item)
+    workmgnt_table.put_item(Item=work_detail)
 
+    work_status = {}
+    work_status_date =datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    work_status['id'] =workid
+    work_status['status'] =data['status']
+    work_status['statusDate'] =work_status_date
+    work_status['statusTransition'] = [{ "status" : data['status'], "statusDate" :work_status_date}]
+
+    workstatus_table.put_item(Item=work_status)
     # create a response
     response = {
         "statusCode": 200,
-        "body": json.dumps(item)
+        "body": json.dumps(work_detail)
     }
 
     return response
