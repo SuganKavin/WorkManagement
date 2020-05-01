@@ -49,10 +49,12 @@ class WorkMgntService(core.Construct):
                                        code=lambda_.Code.asset("resources"),
                                        handler="update.handler",
                                        environment=dict(
-                                           WORKMGNT_TABLE=workmgnt_table.table_name)
+                                           WORKMGNT_TABLE=workmgnt_table.table_name,
+                                           WORKMGNTSTATUS_TABLE=workstatus_table.table_name)
                                        )
 
         workmgnt_table.grant_write_data(put_handler)
+        workstatus_table.grant_write_data(put_handler)
 
         delete_handler = lambda_.Function(self, "WorkMngtDeleteHandler",
                                           function_name="WorkMgntDelete",

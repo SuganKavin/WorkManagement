@@ -1,9 +1,8 @@
 import json
 import logging
 import os
-import uuid
 import boto3
-
+import decimal
 from botocore.exceptions import ClientError
 from datetime import datetime
 
@@ -21,20 +20,18 @@ def handler(event, context):
 
 
     table = dynamodb.Table(os.environ['WORKMGNT_TABLE'])
+    status_table = dynamodb.Table(os.environ['WORKMGNTSTATUS_TABLE'])
 
-    expression_attribute_values = "SET "
+
+    expressionAttributeValues = {}
+    updateExpression ='SET '
 
     for k, v in data.items():
-
-        if k=="travelIndicator" or k=="criticalIndicator" or k=="internAllowedIndicator":
-            expression_attribute_values += "%s= bool(%s),"%(k,v)
-        elif k=="estimatedEffort" or k=="rewardUnits" :
-            expression_attribute_values += "%s= %s,"%(k,v)
-        elif isinstance(v,list):
-            expression_attribute_values += "%s =list_append(if_not_exists(%s, []), %s),"%(k,k,v)
+        expressionAttributeValues[':%s'%(k)] =v
+        if isinstance(v,list):
+            updateExpression += "%s=list_append(%s,:%s),"%(k,k,k)
         else:
-            expression_attribute_values += "%s= '%s',"%(k,v)
-
+            updateExpression +=  '%s=:%s,'%(k,k)
 
     try:
         # update the account in the database
@@ -42,12 +39,32 @@ def handler(event, context):
             Key={
                 'id': event['pathParameters']['id']
             },
-            UpdateExpression='SET status= "Update work description",delegateAccountId= "12345",delegatePermission= "yes",submittedDate= "2020-05-20"',
-            #expression_attribute_values[:-1],
+            ExpressionAttributeValues=expressionAttributeValues,
+            UpdateExpression=updateExpression[:-1],
             ReturnValues='ALL_NEW',
         )
 
         replace_decimals(result)
+
+        work_status_date =datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        status_result = status_table.update_item(
+            Key={
+                'id': event['pathParameters']['id']
+            },
+            ExpressionAttributeValues={
+                ':status': data['status1'],
+                ':statusDate': work_status_date,
+                ':statusTransition':  [
+                    {
+                        "status":data['status1'],
+                        "statusDate": work_status_date
+                    }
+                ]
+            },
+            UpdateExpression='SET status1 = :status, statusDate = :statusDate, statusTransition =list_append(statusTransition,:statusTransition)',
+            ReturnValues='ALL_NEW',
+        )
+
 
         # create a response
         response = {
@@ -57,8 +74,8 @@ def handler(event, context):
     except ClientError as ex:
         response = {
             "statusCode": 400,
-            "body": json.dumps(expression_attribute_values[:-1])
-           # "body": json.dumps(ex.response['Error']['Message'])
+            #"body": json.dumps(expression_attribute_values[:-1])
+            "body": json.dumps(ex.response['Error']['Message'])
         }
 
     return response
