@@ -1,32 +1,127 @@
+from botocore.exceptions import ClientError
 import os
 import json
 import boto3
 import decimal
-
+from boto3.dynamodb.conditions import Key
 dynamodb = boto3.resource('dynamodb')
+
 
 def handler(event, context):
     table = dynamodb.Table(os.environ['WORKMGNT_TABLE'])
+    if event['queryStringParameters'] is not None:
+        accountId = event['queryStringParameters'].get('accountId')
+        #status = event['queryStringParameters'].get('status')
+        if accountId is None:  # or status is None:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"errCode": "LW_AC_001", "errMessage": "accountId is mandatory"})
+            }
+        else:
+            try:
+                poster_result = table.query(
+                    IndexName='workmgnt_acctid-index',
+                    KeyConditionExpression=Key('accountId').eq(
+                        accountId),
+                    # & Key('currentStatus').eq(status),
+                    ScanIndexForward=False
+                )
+                print(poster_result)
+                delegate_result = table.query(
+                    IndexName='workmgnt_delegateid-index',
+                    KeyConditionExpression=Key('delegateAccountId').eq(
+                        accountId),
+                    # & Key('currentStatus').eq(status),
+                    ScanIndexForward=False
+                )
+                print(delegate_result)
 
-    result = table.get_item(
-        Key={
-            'id': event['pathParameters']['id']
-        }
-    )
+                works = []
+                orgId = ''
+                if 'Items' in poster_result:
+                    for work in poster_result['Items']:
+                        workDetail = {}
+                        orgId = work['orgId']
+                        workDetail['workId'] = work['workId']
+                        workDetail['currentStatus'] = work['currentStatus']
+                        workDetail['delegateWork'] = False
+                        workDetail['biddingEndDateTime'] = work['biddingEndDateTime']
+                        workDetail['functionalDomain'] = work['functionalDomain']
+                        skills = work['skills']
+                        skillList = []
+                        for skill in skills:
+                            skillList.append(skill['skillName'])
+                        workDetail['skills'] = skillList
+                        workDetail['criticalWork'] = work['criticalWork']
+                        works.append(workDetail)
 
-    if 'Item' in result:
-        replace_decimals(result)
-        # create a response
-        response = {
-            "statusCode": 200,
-            "body": json.dumps(result['Item'])
-        }
+                if 'Items' in delegate_result:
+                    for work in delegate_result['Items']:
+                        workDetail = {}
+                        orgId = work['orgId']
+                        workDetail['workId'] = work['workId']
+                        workDetail['currentStatus'] = work['currentStatus']
+                        workDetail['delegateWork'] = True
+                        workDetail['biddingEndDateTime'] = work['biddingEndDateTime']
+                        workDetail['functionalDomain'] = work['functionalDomain']
+                        skills = work['skills']
+                        skillList = []
+                        for skill in skills:
+                            skillList.append(skill['skillName'])
+                        workDetail['skills'] = skillList
+                        workDetail['criticalWork'] = work['criticalWork']
+                        works.append(workDetail)
+
+                worksDetail = {}
+                worksDetail['accountId'] = accountId
+                worksDetail['orgId'] = orgId
+                worksDetail['Works'] = works
+
+                replace_decimals(delegate_result)
+                # create a response
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps(worksDetail)
+                }
+            except ClientError as ex:
+                response = {
+                    "statusCode": 400,
+                    # "body": json.dumps(expression_attribute_values[:-1])
+                    "body": json.dumps(ex.response['Error']['Message'])
+                }
+    elif event['pathParameters'] is not None:
+        workId = event['pathParameters']['id']
+        try:
+            result = table.get_item(
+                Key={
+                    'workId': event['pathParameters']['id']
+                }
+            )
+            replace_decimals(result)
+
+            if 'Item' in result:
+                # create a response
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps(result['Item'])
+                }
+            else:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps("WorkId is not available")
+                }
+        except ClientError as ex:
+            response = {
+                "statusCode": 400,
+                # "body": json.dumps(expression_attribute_values[:-1])
+                "body": json.dumps(ex.response['Error']['Message'])
+            }
     else:
-        response = {
+        return {
             "statusCode": 400,
-            "body": json.dumps("WorkId is not available")
+            "body": json.dumps({"errCode": "LW_AC_001", "errMessage": "accountId/status or workId is mandatory"})
         }
-    return response
+
 
 def replace_decimals(obj):
     if isinstance(obj, list):

@@ -10,61 +10,60 @@ dynamodb = boto3.resource('dynamodb')
 
 
 def handler(event, context):
-    data = json.loads(event['body'])
+    workmngt_data = json.loads(event['body'])
 
-    id  = event['pathParameters']['id']
-
+    id = event['pathParameters']['id']
+    table = dynamodb.Table(os.environ['WORKMGNT_TABLE'])
     if not id:
         logging.error("Validation Failed. Missing id")
         raise Exception("Couldn't create the workid.")
 
-
-    table = dynamodb.Table(os.environ['WORKMGNT_TABLE'])
-    status_table = dynamodb.Table(os.environ['WORKMGNTSTATUS_TABLE'])
-
-
+    date = datetime.now()
+    fromDateStr = date.strftime("%m/%d/%Y %H:%M:%S")
     expressionAttributeValues = {}
-    updateExpression ='SET '
-
-    for k, v in data.items():
-        expressionAttributeValues[':%s'%(k)] =v
-        if isinstance(v,list):
-            updateExpression += "%s=list_append(%s,:%s),"%(k,k,k)
+    updateExpression = 'SET '
+    for k, v in workmngt_data.items():
+        expressionAttributeValues[':%s' % (k)] = v
+        if k == 'delegatePermission':
+            updateExpression += '%s=:%s,' % (k, k)
+        elif k == 'status':
+            updateExpression += '%s=:%s,' % ('currentStatus', k)
+        elif isinstance(v, list):
+            updateExpression += "%s=list_append(%s,:%s)," % (k, k, k)
         else:
-            updateExpression +=  '%s=:%s,'%(k,k)
+            updateExpression += '%s=:%s,' % (k, k)
+    expressionAttributeValues[':currentStatusDate'] = fromDateStr
+    updateExpression += '%s=:%s,' % ('CurrentStatusDate', 'currentStatusDate')
+
+    status_transition = []
+    status = {}
+    status['status'] = workmngt_data['status']
+    status['date'] = fromDateStr
+    if 'changedBy' in workmngt_data:
+        status['changedBy'] = workmngt_data['changedBy']
+    else:
+        status['changedBy'] = workmngt_data['accountId']
+    status_transition.append(status)
+
+    expressionAttributeValues[':statustransition'] = status_transition
+    updateExpression += "%s=list_append(%s,:%s)" % (
+        'statusTransition', 'statusTransition', 'statustransition')
+
+    print(expressionAttributeValues)
+    print(updateExpression)
 
     try:
         # update the account in the database
         result = table.update_item(
             Key={
-                'id': event['pathParameters']['id']
+                'workId': event['pathParameters']['id']
             },
             ExpressionAttributeValues=expressionAttributeValues,
-            UpdateExpression=updateExpression[:-1],
+            UpdateExpression=updateExpression,
             ReturnValues='ALL_NEW',
         )
 
         replace_decimals(result)
-
-        work_status_date =datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        status_result = status_table.update_item(
-            Key={
-                'id': event['pathParameters']['id']
-            },
-            ExpressionAttributeValues={
-                ':status': data['status1'],
-                ':statusDate': work_status_date,
-                ':statusTransition':  [
-                    {
-                        "status":data['status1'],
-                        "statusDate": work_status_date
-                    }
-                ]
-            },
-            UpdateExpression='SET status1 = :status, statusDate = :statusDate, statusTransition =list_append(statusTransition,:statusTransition)',
-            ReturnValues='ALL_NEW',
-        )
-
 
         # create a response
         response = {
@@ -74,11 +73,11 @@ def handler(event, context):
     except ClientError as ex:
         response = {
             "statusCode": 400,
-            #"body": json.dumps(expression_attribute_values[:-1])
             "body": json.dumps(ex.response['Error']['Message'])
         }
 
     return response
+
 
 def replace_decimals(obj):
     if isinstance(obj, list):

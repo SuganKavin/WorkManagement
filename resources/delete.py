@@ -9,7 +9,7 @@ def handler(event, context):
 
     table.delete_item(
         Key={
-            'id': event['pathParameters']['id']
+            'workId': event['pathParameters']['id']
         }
     )
 
